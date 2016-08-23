@@ -1,7 +1,7 @@
 #include <string.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#include <bits/sigaction.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
