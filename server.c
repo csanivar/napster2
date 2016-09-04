@@ -11,9 +11,9 @@
 
 #define SERVER_PORT "9967"
 #define BACKLOG 10
+#define MAX_DATA_SIZE 200
 
-void sigchld_handler(int s)
-{
+void sigchld_handler(int s) {
     // waitpid() might overwrite errno, so we save and restore it:
     int saved_errno = errno;
 
@@ -22,10 +22,8 @@ void sigchld_handler(int s)
     errno = saved_errno;
 }
 
-
 // get sockaddr, IPv4 or IPv6:
-void *get_in_addr(struct sockaddr *sa)
-{
+void *get_in_addr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
         return &(((struct sockaddr_in*)sa)->sin_addr);
     }
@@ -33,8 +31,15 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+struct remote_file {
+    char addr[INET6_ADDRSTRLEN]; // Remote address/location of the file
+    char file_name[256]; // File name as published by the peer
+    char file_location[256]; // Location of the file at peer
+};
+
 int main(void) {
-    int sockfd, new_fd;
+    int sockfd, new_fd, numbytes;
+    char buf[MAX_DATA_SIZE], buf_c[MAX_DATA_SIZE]; // buffer and buffer copy
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage client_addr;
     socklen_t sin_size;
@@ -42,6 +47,7 @@ int main(void) {
     int yes = 1;
     char s[INET6_ADDRSTRLEN];
     int rv;
+    struct remote_file file_list[256];
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
@@ -107,11 +113,34 @@ int main(void) {
 
         if(!fork()) {
             close(sockfd);
-            if(send(new_fd, "Hello, World", 12, 0) == -1) {
-                perror("send");
+            while(1) {
+                if(-1 == (numbytes = recv(new_fd, buf, MAX_DATA_SIZE-1, 0))) {
+                    perror("server: recv");
+                }
+                if(0 == numbytes) {
+                    close(new_fd);
+                    exit(0);
+                }
+
+                buf[numbytes] = '\0';
+                printf("server: received '%s'\n", buf);
+                memcpy(buf_c, buf, sizeof buf);
+
+                char* action_req = strtok(buf_c, " ");
+                if(0 == strcmp(action_req, "connect")) {
+                    if(-1 == send(new_fd, "Sure", 4, 0)) {
+                        perror("send");
+                    }
+                } else if(0 == strcmp(action_req, "disconnect")) {
+                    close(new_fd);
+                    exit(0);
+                } else if(0 == strcmp(action_req, "publish")) {
+                    char* file_name = strtok(NULL, " ");
+                    char* file_location = strtok(NULL, " ");
+                    printf("file_name: %s\n", file_name);
+                    printf("file_location: %s\n", file_location);
+                }
             }
-            close(new_fd);
-            exit(0);
         }
 
         close(new_fd);

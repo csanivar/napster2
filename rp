@@ -1,0 +1,2 @@
+gcc peer.c -o peer
+./peer 0.0.0.0 9967

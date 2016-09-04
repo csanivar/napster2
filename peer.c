@@ -15,8 +15,7 @@
 #define MAX_DATA_SIZE 100
 
 // get sockaddr, IPv4 or IPv6:
-void *get_in_addr(struct sockaddr *sa)
-{
+void *get_in_addr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
         return &(((struct sockaddr_in*)sa)->sin_addr);
     }
@@ -26,7 +25,8 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(int argc, char* argv[]) {
     int sockfd, numbytes;
-    char buf[MAX_DATA_SIZE];
+    char buf[MAX_DATA_SIZE], args[256], args_c[256];
+    char* action;
     struct addrinfo hints, *servinfo, *p;
     int rv;
     char s[INET6_ADDRSTRLEN];
@@ -70,16 +70,41 @@ int main(int argc, char* argv[]) {
 
     freeaddrinfo(servinfo);
 
-    if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
-        perror("peer: recv");
-        exit(1);
+    while(1) {
+        args[0] = 0; // Empty the string array
+        scanf("%[^\n]%*c", args);
+        strncpy(args_c, args, sizeof args);
+        if(0 != strlen(args)) {
+            printf("args len: %d\n", strlen(args));
+            if(!fork()) {
+                action = strtok(args_c, " ");
+                if(0 == strcmp("add", action)) {
+                    buf[0] = 0;
+                    if(-1 == send(sockfd, "connect", 7, 0)) {
+                        perror("send");
+                    }
+
+                    if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
+                        perror("peer: recv");
+                        exit(1);
+                    }
+                    buf[numbytes] = '\0';
+                    printf("peer: received '%s'\n", buf);
+                } else if(0 == strcmp("publish", action)) {
+                    char* file_name = strtok(NULL, " ");
+                    char* file_location = strtok(NULL, " ");
+                    if(0 != strlen(file_name) && 0 != strlen(file_location)) {
+                        if(-1 == send(sockfd, args, strlen(args), 0)) {
+                            perror("send");
+                        }
+                    } else {
+                        printf("'publish' called without a file name or file location. Use 'help' to see proper usage");
+                    }
+                }
+                exit(0);
+            }
+        }
     }
-
-    buf[numbytes] = '\0';
-
-    printf("peer: received '%s'\n", buf);
-
-    close(sockfd);
 
     return 0;
 }
