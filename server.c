@@ -45,6 +45,32 @@ struct remote_file {
     char file_location[256]; // Location of the file at peer
 };
 
+struct matched_list {
+    struct remote_file* matches;
+    int num_matches;
+};
+
+struct remote_file file_list[256];
+int num_files = 0;
+
+struct matched_list fetch_file(char* file_name) {
+    // printf("num_files: %d\n", num_files);
+    int i = 0, num_matches = 0;
+    struct remote_file* matches = malloc(100*sizeof(struct remote_file));
+    for(i; i<num_files; i++) {
+        // printf("file_name: %s\n", file_list[i].file_name);
+        if(0 == strcmp(file_name, file_list[i].file_name)) {
+            matches[num_matches] = file_list[i];
+            num_matches++;
+        }
+    }
+    // printf("matches: %d\n", matches);
+    struct matched_list result;
+    result.matches = matches;
+    result.num_matches = num_matches;
+    return result; 
+}
+
 int main(void) {
     int sockfd, new_fd, numbytes;
     char buf[MAX_DATA_SIZE], buf_c[MAX_DATA_SIZE]; // buffer and buffer copy
@@ -52,10 +78,9 @@ int main(void) {
     struct sockaddr_storage client_addr;
     socklen_t sin_size;
     struct sigaction sa;
-    int yes = 1, num_files = 0;
+    int yes = 1;
     char s[INET6_ADDRSTRLEN];
     int rv;
-    struct remote_file file_list[256];
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
@@ -165,6 +190,43 @@ int main(void) {
                     printf("file_location: %s\n", file_location);
                 } else if(0 == strcmp(action_req, "fetch")) {
                     char* file_name = strtok(NULL, " ");
+                    if(0 != strlen(file_name)) {
+                        struct matched_list matched_list = fetch_file(file_name);
+                        int res_code;
+                        if(0 == matched_list.num_matches) {
+                            res_code = 404;
+                        } else {
+                            res_code = 200;
+                        }
+                        int res_code_conv = htonl(res_code);
+                        if(-1 == send(new_fd, &res_code_conv, sizeof res_code_conv, 0)) {
+                            perror("send");
+                        }
+
+                        if(200 == res_code) {
+                            int num_matches_conv = htonl(matched_list.num_matches);
+                            if(-1 == send(new_fd, &num_matches_conv, sizeof num_matches_conv, 0)) {
+                                perror("send");
+                            }
+                            // printf("num_matches: %d\n", matched_list.num_matches);
+                            struct remote_file* fetch_result = matched_list.matches;
+                            char* data = (char*)malloc(matched_list.num_matches*sizeof(struct remote_file));
+                            memcpy(data, &fetch_result, sizeof data);
+                            printf("size of fetch_result:%d\n", sizeof &data);
+                            printf("%s\n", &data);
+                            struct remote_file* temp = malloc(sizeof data);
+                            memcpy(&temp, data, sizeof data);
+                            printf("temp: %s\n", temp[0].file_location);
+                            // printf("size of data:%d\n", sizeof data);
+                            int bytes_sent;
+                            if(-1 == (bytes_sent = send(new_fd, &data, sizeof data, 0))) {
+                                perror("send");
+                            }
+                            printf("bytes_sent: %d\n", &bytes_sent);
+                        }
+                    } else {
+                        printf("BAD REQUEST");
+                    }
                 }
             }
         }

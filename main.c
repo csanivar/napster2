@@ -1,3 +1,6 @@
+//
+// Created by mouli on 8/24/16.
+//
 #include <string.h>
 #include <netinet/in.h>
 #include <netdb.h>
@@ -9,23 +12,10 @@
 #include <errno.h>
 #include <arpa/inet.h>
 
-#define SERVER_PORT "9967"
-#define BACKLOG 10
-
-void sigchld_handler(int s)
-{
-    // waitpid() might overwrite errno, so we save and restore it:
-    int saved_errno = errno;
-
-    while(waitpid(-1, NULL, WNOHANG) > 0);
-
-    errno = saved_errno;
-}
-
+#define MAX_DATA_SIZE 10000
 
 // get sockaddr, IPv4 or IPv6:
-void *get_in_addr(struct sockaddr *sa)
-{
+void *get_in_addr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
         return &(((struct sockaddr_in*)sa)->sin_addr);
     }
@@ -33,88 +23,129 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-int main(void) {
-    int sockfd, new_fd;
+struct remote_file {
+    struct sockaddr_storage file_addr; // Remote address/location of the file
+    char file_name[256]; // File name as published by the peer
+    char file_location[256]; // Location of the file at peer
+};
+
+int main(int argc, char* argv[]) {
+    int sockfd, numbytes;
+    char buf[MAX_DATA_SIZE], args[256], args_c[256];
+    char* action;
     struct addrinfo hints, *servinfo, *p;
-    struct sockaddr_storage client_addr;
-    socklen_t sin_size;
-    struct sigaction sa;
-    int yes = 1;
-    char s[INET6_ADDRSTRLEN];
     int rv;
+    char s[INET6_ADDRSTRLEN];
+
+    if(3 != argc) {
+        fprintf(stderr, "usage: peer server_ip server_port\n");
+        exit(1);
+    }
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-    if((rv = getaddrinfo(NULL, SERVER_PORT, &hints, &servinfo)) !=0) {
+
+    if(0 != (rv = getaddrinfo(argv[1], argv[2], &hints, &servinfo))) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
 
-    for(p = servinfo; p != NULL; p = servinfo->ai_next) {
-        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-            perror("server: socket");
+    for(p = servinfo; p != NULL; p = p->ai_next) {
+        if(-1 == (sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))) {
+            perror("peer: socket");
             continue;
         }
 
-        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-            perror("setsockopt");
-            exit(1);
-        }
-
-        if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+        if(-1 == connect(sockfd, p->ai_addr, p->ai_addrlen)) {
             close(sockfd);
-            perror("server: bind");
+            perror("peer: connect");
             continue;
         }
 
         break;
     }
 
+    if(NULL == p) {
+        fprintf(stderr, "peer: failed to connect\n");
+        return 2;
+    }
+
+    inet_ntop(p->ai_family, get_in_addr((struct sockaddr*)p->ai_addr), s, sizeof s);
+    printf("peer: connecting to %s\n", s);
+
     freeaddrinfo(servinfo);
 
-    if(NULL == p) {
-        fprintf(stderr, "server: failed to bind\n");
-        exit(1);
-    }
-
-    if(-1 == listen(sockfd, BACKLOG)) {
-        perror("listen");
-        exit(1);
-    }
-
-    sa.sa_handler = sigchld_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    if(-1 == sigaction(SIGCHLD, &sa, NULL)) {
-        perror("sigaction");
-        exit(1);
-    }
-
-    printf("server: waiting for connection....\n");
-
     while(1) {
-        sin_size = sizeof client_addr;
-        new_fd = accept(sockfd, (struct sockaddr *)&client_addr, &sin_size);
+        args[0] = 0; // Empty the string array
+        scanf("%[^\n]%*c", args);
+        strncpy(args_c, args, sizeof args);
+        if(0 != strlen(args)) {
+            printf("args len: %d\n", strlen(args));
+            if(!fork()) {
+                action = strtok(args_c, " ");
+                if(0 == strcmp("add", action)) {
+                    buf[0] = 0;
+                    if(-1 == send(sockfd, "connect", 7, 0)) {
+                        perror("send");
+                    }
 
-        if(-1 == new_fd) {
-            perror("accept");
-            continue;
-        }
-        inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr *)&client_addr), s, sizeof s);
-        printf("server: got connection from %s\n", s);
+                    if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
+                        perror("peer: recv");
+                        exit(1);
+                    }
+                    buf[numbytes] = '\0';
+                    printf("peer: received '%s'\n", buf);
+                } else if(0 == strcmp("publish", action)) {
+                    char* file_name = strtok(NULL, " ");
+                    char* file_location = strtok(NULL, " ");
+                    if(0 != strlen(file_name) && 0 != strlen(file_location)) {
+                        if(-1 == send(sockfd, args, strlen(args), 0)) {
+                            perror("send");
+                        }
+                    } else {
+                        printf("'publish' called without a file name or file location. Use 'help' to see proper usage");
+                    }
+                } else if(0 == strcmp("fetch", action)) {
+                    char* file_name = strtok(NULL, " ");
+                    if(0 == strlen(file_name)) {
+                        printf("'fetch' called without a file name. Use 'help' to see proper usage");
+                    } else {
+                        if(-1 == send(sockfd, args, strlen(args), 0)) {
+                            perror("send");
+                        }
 
-        if(!fork()) {
-            close(sockfd);
-            if(send(new_fd, "Hello, World", 12, 0) == -1) {
-                perror("send");
+                        int res_code;
+                        if(-1 == recv(sockfd, &res_code, sizeof res_code, 0)) {
+                            perror("peer: recv");
+                        }
+                        printf("peer: received '%d'\n", ntohl(res_code));
+
+                        if(200 == ntohl(res_code)) {
+                            int num_matches_conv;
+                            if(-1 == recv(sockfd, &num_matches_conv, sizeof num_matches_conv, 0)) {
+                                perror("peer: recv");
+                                exit(1);
+                            }
+
+                            if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
+                                perror("recv");
+                                exit(1);
+                            }
+                            printf("numbytes: %d\n", numbytes);
+                            printf("sizerrerwer: %d\n", ntohl(num_matches_conv)*sizeof(struct remote_file));
+                            struct remote_file* fetch_result = malloc(sizeof buf);
+                            printf("peer received: %s\n", &buf);
+                            memcpy(&fetch_result, buf, sizeof buf);
+                            // printf("fetch size: %d\n", sizeof fetch_result);
+                            printf("file location: %s\n", fetch_result[0].file_location);
+                            printf("its loaded\n");
+                        }
+                    }
+                }
+                exit(0);
             }
-            close(new_fd);
-            exit(0);
         }
-
-        close(new_fd);
     }
 
     return 0;
