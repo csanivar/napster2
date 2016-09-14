@@ -100,6 +100,15 @@ int main(int argc, char* argv[]) {
                     } else {
                         printf("'publish' called without a file name or file location. Use 'help' to see proper usage");
                     }
+                } else if(0 == strcmp("fetch", action)) {
+                    char* file_name = strtok(NULL, " ");
+                    if(0 != strlen(file_name)) {
+                        if(-1 == send(sockfd, args, strlen(args), 0)) {
+                            perror("send");
+                        }
+                    } else {
+                        printf("'fetch' called without a file name. Use 'help' to see proper usage");
+                    }
                 }
                 exit(0);
             }

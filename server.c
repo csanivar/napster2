@@ -31,8 +31,16 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+in_port_t get_in_port(struct sockaddr *sa) {
+    if (sa->sa_family == AF_INET) {
+        return (((struct sockaddr_in*)sa)->sin_port);
+    }
+
+    return (((struct sockaddr_in6*)sa)->sin6_port);
+}
+
 struct remote_file {
-    char addr[INET6_ADDRSTRLEN]; // Remote address/location of the file
+    struct sockaddr_storage file_addr; // Remote address/location of the file
     char file_name[256]; // File name as published by the peer
     char file_location[256]; // Location of the file at peer
 };
@@ -44,7 +52,7 @@ int main(void) {
     struct sockaddr_storage client_addr;
     socklen_t sin_size;
     struct sigaction sa;
-    int yes = 1;
+    int yes = 1, num_files = 0;
     char s[INET6_ADDRSTRLEN];
     int rv;
     struct remote_file file_list[256];
@@ -108,11 +116,19 @@ int main(void) {
             perror("accept");
             continue;
         }
-        inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr *)&client_addr), s, sizeof s);
-        printf("server: got connection from %s\n", s);
 
         if(!fork()) {
             close(sockfd);
+
+            struct sockaddr_storage peer_addr;
+            char peer_ip[INET6_ADDRSTRLEN];
+            int peer_port;
+
+            peer_addr = client_addr;
+            inet_ntop(peer_addr.ss_family, get_in_addr((struct sockaddr *)&peer_addr), peer_ip, sizeof peer_ip);
+            peer_port = ntohs(get_in_port((struct sockaddr *)&peer_addr));
+            printf("server: got connection from %s:%d\n", peer_ip, peer_port);
+            
             while(1) {
                 if(-1 == (numbytes = recv(new_fd, buf, MAX_DATA_SIZE-1, 0))) {
                     perror("server: recv");
@@ -137,8 +153,18 @@ int main(void) {
                 } else if(0 == strcmp(action_req, "publish")) {
                     char* file_name = strtok(NULL, " ");
                     char* file_location = strtok(NULL, " ");
+                    struct remote_file file_received;
+                    file_received.file_addr = peer_addr;
+                    strcpy(file_received.file_name, file_name);
+                    strcpy(file_received.file_location, file_location);
+                    file_list[num_files] = file_received;
+                    num_files++;
+
+                    printf("file_addr: %s:%d\n", peer_ip, peer_port); 
                     printf("file_name: %s\n", file_name);
                     printf("file_location: %s\n", file_location);
+                } else if(0 == strcmp(action_req, "fetch")) {
+                    char* file_name = strtok(NULL, " ");
                 }
             }
         }
