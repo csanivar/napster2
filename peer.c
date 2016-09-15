@@ -12,9 +12,15 @@
 #include <errno.h>
 #include <arpa/inet.h>
 #include <dirent.h>
+#include <sys/uio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #define MAX_DATA_SIZE 10000
 #define BACKLOG 10
+#define FILE_BUF_SIZE 4096
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa) {
@@ -52,10 +58,16 @@ struct remote_file {
     char file_location[256]; // Location of the file at peer
 };
 
-int download_file(struct remote_file file_req) {
+int download_file(struct remote_file file_req, char* download_path) {
     struct addrinfo hints, *servinfo, *p;
     int rv, fetchfd;
     char s[INET6_ADDRSTRLEN];
+    char* fetch_req = malloc(100);
+    int f, n, file_cnt = 30;
+    void* file_buf;
+    char* file_path = malloc(100);
+
+    file_buf = (void*)malloc(FILE_BUF_SIZE);
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
@@ -66,6 +78,7 @@ int download_file(struct remote_file file_req) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
+    
 
     for(p = servinfo; p != NULL; p = p->ai_next) {
         if(-1 == (fetchfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))) {
@@ -89,9 +102,69 @@ int download_file(struct remote_file file_req) {
 
     inet_ntop(p->ai_family, get_in_addr((struct sockaddr*)p->ai_addr), s, sizeof s);
     printf("peer: connecting to %s\n", s);
-    
-
     freeaddrinfo(servinfo);
+
+    strcpy(fetch_req, "download ");
+    strcat(fetch_req, file_req.file_name);
+    if(-1 == send(fetchfd, fetch_req, 100, 0)) {
+        perror("send");
+    }
+
+    //Build the file_path where the file will be downloaded
+    strcpy(file_path, download_path);
+    strcat(file_path, "/");
+    strcat(file_path, file_req.file_name);
+
+    f = open(file_path, O_CREAT|O_RDWR, 0755);
+    while(1) {
+        n = read(fetchfd, file_buf, FILE_BUF_SIZE);
+        if(n<=0) {
+            break;
+        }
+        write(f, file_buf, n);
+    }
+
+    free(file_buf);
+    close(f);
+    close(fetchfd);
+    printf("Download finised\n");
+
+    return 0;
+}
+
+void upload_file(int connfd, char* file_name, char* download_path) {
+    char* file_path = malloc(100);
+    int f, n;
+    void* file_buf;
+
+    file_buf = (void*)malloc(FILE_BUF_SIZE);
+
+    strcpy(file_path, download_path);
+    strcat(file_path, "/");
+    strcat(file_path, file_name);
+
+    printf("\nfile_path: %s\n", file_path);
+    f = open(file_path, O_RDONLY);
+    if(f<0) {
+        printf("\nUnable to open requested file\n");
+        return;
+    }
+
+    printf("\nUploading file: %s\n", file_name);
+    while(1) {
+        n = read(f, file_buf, FILE_BUF_SIZE);
+        printf("n: %d\n", n);
+        if(n<=0) {
+            break;
+        }
+        send(connfd, (const void*)file_buf, n, 0);
+    }
+    printf("Upload finished\n");
+
+    free(file_buf);
+    close(f);
+
+    return;
 }
 
 void publish_file_to_server(int connfd, char* file_name, char* file_location) {
@@ -235,6 +308,20 @@ int main(int argc, char* argv[]) {
                 inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr *)&client_addr), peer_ip, sizeof peer_ip);
                 peer_port = ntohs(get_in_port((struct sockaddr *)&client_addr));
                 printf("server: got connection from %s:%d\n", peer_ip, peer_port);
+
+                buf[0] = 0;
+                if(-1 == (numbytes = recv(new_fd, buf, MAX_DATA_SIZE-1, 0))) {
+                    perror("peer: recv");
+                    exit(1);
+                }
+                buf[numbytes] = '\0';
+                printf("peer: received '%s'\n", buf);
+
+                char* action_req = strtok(buf, " ");
+                if(0 == strcmp("download", action_req)) {
+                    char* download_file_name = strtok(NULL, " ");
+                    upload_file(new_fd, download_file_name, download_path);
+                }
             }
             close(new_fd);
             exit(0);
@@ -296,7 +383,6 @@ int main(int argc, char* argv[]) {
                         if(-1 == recv(sockfd, &res_code, 16, 0)) {
                             perror("peer: recv");
                         }
-                        printf("peer: received res_code '%d'\n", res_code);
                         printf("peer: received res_code '%d'\n", ntohl(res_code));
 
                         if(200 == ntohl(res_code)) {
@@ -310,7 +396,9 @@ int main(int argc, char* argv[]) {
 
                             printf("file addr: %s:%s\n", fetch_result.peer_ip, fetch_result.peer_port);
                             printf("file location: %s\n", fetch_result.file_location);
-                            download_file(fetch_result);
+                            download_file(fetch_result, download_path);
+                        } else if(400 == ntohl(res_code)) {
+                            printf("\nUh-oh! Requested file is not found!!\n");
                         }
                     }
                 }
