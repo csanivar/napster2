@@ -81,7 +81,7 @@ int main(int argc, char* argv[]) {
         scanf("%[^\n]%*c", args);
         strncpy(args_c, args, sizeof args);
         if(0 != strlen(args)) {
-            printf("args len: %d\n", strlen(args));
+            // printf("args len: %d\n", strlen(args));
             if(!fork()) {
                 action = strtok(args_c, " ");
                 if(0 == strcmp("add", action)) {
@@ -132,13 +132,14 @@ int main(int argc, char* argv[]) {
                                 perror("recv");
                                 exit(1);
                             }
-                            printf("numbytes: %d\n", numbytes);
-                            printf("sizerrerwer: %d\n", ntohl(num_matches_conv)*sizeof(struct remote_file));
-                            struct remote_file* fetch_result = malloc(sizeof buf);
-                            printf("peer received: %s\n", &buf);
-                            memcpy(&fetch_result, &buf, sizeof &buf);
+                            // buf[numbytes] = '\0';
+                            // printf("numbytes: %d\n", numbytes);
+                            // printf("sizerrerwer: %d\n", ntohl(num_matches_conv)*sizeof(struct remote_file));
+                            struct remote_file* fetch_result = malloc(numbytes);
+                            printf("peer received: %02x\n", buf);
+                            memcpy(&fetch_result, buf, numbytes);
                             // printf("fetch size: %d\n", sizeof fetch_result);
-                            printf("file location: %s\n", fetch_result[0].file_location);
+                            printf("file location: %s\n", fetch_result[0]);
                             printf("its loaded\n");
                         }
                     }

@@ -169,7 +169,10 @@ int main(void) {
 
                 char* action_req = strtok(buf_c, " ");
                 if(0 == strcmp(action_req, "connect")) {
-                    if(-1 == send(new_fd, "Sure", 4, 0)) {
+                    char* res_con = malloc(30);
+                    strcpy(res_con, "sureahsjdhajsdhajdhkahdjahsdjadkad");
+                    printf("sizeof res_con: %d\n", sizeof res_con);
+                    if(-1 == send(new_fd, res_con, sizeof res_con, 0)) {
                         perror("send");
                     }
                 } else if(0 == strcmp(action_req, "disconnect")) {
@@ -213,16 +216,19 @@ int main(void) {
                             char* data = (char*)malloc(matched_list.num_matches*sizeof(struct remote_file));
                             memcpy(data, &fetch_result, sizeof data);
                             printf("size of fetch_result:%d\n", sizeof &data);
-                            printf("%s\n", &data);
+                            printf("%02x\n", data);
+
                             struct remote_file* temp = malloc(sizeof data);
                             memcpy(&temp, data, sizeof data);
                             printf("temp: %s\n", temp[0].file_location);
+                            printf("temp total: %s\n", temp[0]);
+                            
                             // printf("size of data:%d\n", sizeof data);
                             int bytes_sent;
-                            if(-1 == (bytes_sent = send(new_fd, &data, sizeof data, 0))) {
+                            if(-1 == (bytes_sent = send(new_fd, data, matched_list.num_matches*sizeof(struct remote_file), 0))) {
                                 perror("send");
                             }
-                            printf("bytes_sent: %d\n", &bytes_sent);
+                            printf("bytes_sent: %d\n", bytes_sent);
                         }
                     } else {
                         printf("BAD REQUEST");
