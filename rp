@@ -1,2 +1,2 @@
 gcc peer.c -o peer
-./peer 0.0.0.0 9967
+./peer 0.0.0.0 9967 $1

@@ -11,6 +11,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <arpa/inet.h>
+#include <dirent.h>
 
 #define MAX_DATA_SIZE 10000
 #define BACKLOG 10
@@ -88,10 +89,49 @@ int download_file(struct remote_file file_req) {
 
     inet_ntop(p->ai_family, get_in_addr((struct sockaddr*)p->ai_addr), s, sizeof s);
     printf("peer: connecting to %s\n", s);
+    
 
     freeaddrinfo(servinfo);
 }
 
+void publish_file_to_server(int connfd, char* file_name, char* file_location) {
+    if(0 != strlen(file_name) && 0 != strlen(file_location)) {
+        char* publ_req = malloc(100);
+        strcpy(publ_req, "publish ");
+        strcat(publ_req, file_name);
+        strcat(publ_req, " ");
+        strcat(publ_req, file_location);
+        printf("publ_req: %s\n", publ_req);
+        if(-1 == send(connfd, publ_req, 100, 0)) {
+            perror("send");
+        }
+    } else {
+        printf("file_name or file_location is invalid");
+    }
+}
+
+void publish_files(int connfd, char* publish_path) {
+    printf("\npublishing files started\n");
+    DIR *d;
+    struct dirent *dir;
+    d = opendir(publish_path);
+    if(d) {
+        while((dir = readdir(d)) != NULL) {
+            if(dir->d_type == DT_REG) {
+                char* file_name = dir->d_name;
+                char* file_location = malloc(100);
+                strcpy(file_location, publish_path);
+                strcat(file_location, "/");
+                strcat(file_location, file_name);
+                printf("file found: %s\n\n", file_name);
+                publish_file_to_server(connfd, file_name, file_location);
+            }
+        }
+
+        closedir(d);
+    }
+    printf("\npublishing files finished\n");
+}
 
 int main(int argc, char* argv[]) {
     int sockfd, numbytes, new_fd, listenfd, my_port;
@@ -103,12 +143,14 @@ int main(int argc, char* argv[]) {
     char s[INET6_ADDRSTRLEN];
     socklen_t sin_size;
     struct sockaddr_storage client_addr;
+    char* download_path;
 
-    if(3 != argc) {
-        fprintf(stderr, "usage: peer server_ip server_port\n");
+    if(4 != argc) {
+        fprintf(stderr, "usage: peer server_ip server_port abs_share_path\n");
         exit(1);
     }
 
+    download_path = argv[3];
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -199,6 +241,10 @@ int main(int argc, char* argv[]) {
         }
     }
     close(listenfd);
+
+    //Publish files which you are sharing
+    publish_files(sockfd, download_path);
+
     //Wait and read and respond to the user actions
     while(1) {
         args[0] = 0; // Empty the string array
@@ -232,13 +278,10 @@ int main(int argc, char* argv[]) {
                 } else if(0 == strcmp("publish", action)) {
                     char* file_name = strtok(NULL, " ");
                     char* file_location = strtok(NULL, " ");
-                    if(0 != strlen(file_name) && 0 != strlen(file_location)) {
-                        if(-1 == send(sockfd, args, strlen(args), 0)) {
-                            perror("send");
-                        }
-                    } else {
-                        printf("'publish' called without a file name or file location. Use 'help' to see proper usage");
+                    if(0 == strcmp(file_name, "ALL")) {
+                        publish_files(sockfd, download_path);
                     }
+                    publish_file_to_server(sockfd, file_name, file_location);
                 } else if(0 == strcmp("fetch", action)) {
                     char* file_name = strtok(NULL, " ");
                     if(0 == strlen(file_name)) {
@@ -257,13 +300,14 @@ int main(int argc, char* argv[]) {
                         printf("peer: received res_code '%d'\n", ntohl(res_code));
 
                         if(200 == ntohl(res_code)) {
+                            memset(buf, 0, MAX_DATA_SIZE);
                             if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
                                 perror("recv");
                                 exit(1);
                             }
                             struct remote_file fetch_result;
                             memcpy(&fetch_result, buf, numbytes);
-                            
+
                             printf("file addr: %s:%s\n", fetch_result.peer_ip, fetch_result.peer_port);
                             printf("file location: %s\n", fetch_result.file_location);
                             download_file(fetch_result);

@@ -240,7 +240,7 @@ int main(void) {
                             printf("file_port: %s\n", fetch_result.peer_port);
 
                             int bytes_sent;
-                            if(-1 == (bytes_sent = send(new_fd, data, sizeof(struct remote_file), 0))) {
+                            if(-1 == (bytes_sent = send(new_fd, data, 10000, 0))) {
                                 perror("send");
                             }
                             printf("bytes_sent: %d\n", bytes_sent);
