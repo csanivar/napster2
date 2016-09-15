@@ -51,6 +51,47 @@ struct remote_file {
     char file_location[256]; // Location of the file at peer
 };
 
+int download_file(struct remote_file file_req) {
+    struct addrinfo hints, *servinfo, *p;
+    int rv, fetchfd;
+    char s[INET6_ADDRSTRLEN];
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    printf("peer_ip: %s\n", file_req.peer_ip);
+    printf("peer_port: %s\n", file_req.peer_port);
+    if(0 != (rv = getaddrinfo(file_req.peer_ip, file_req.peer_port, &hints, &servinfo))) {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+        return 1;
+    }
+
+    for(p = servinfo; p != NULL; p = p->ai_next) {
+        if(-1 == (fetchfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))) {
+            perror("peer: socket");
+            continue;
+        }
+
+        if(-1 == connect(fetchfd, p->ai_addr, p->ai_addrlen)) {
+            close(fetchfd);
+            perror("peer: connect");
+            continue;
+        }
+
+        break;
+    }
+
+    if(NULL == p) {
+        fprintf(stderr, "peer: failed to connect\n");
+        return 2;
+    }
+
+    inet_ntop(p->ai_family, get_in_addr((struct sockaddr*)p->ai_addr), s, sizeof s);
+    printf("peer: connecting to %s\n", s);
+
+    freeaddrinfo(servinfo);
+}
+
 
 int main(int argc, char* argv[]) {
     int sockfd, numbytes, new_fd, listenfd, my_port;
@@ -118,16 +159,18 @@ int main(int argc, char* argv[]) {
 
     //Get the port this peer is listening on
     my_port = get_my_port(listenfd);
+    printf("my_port: %d\n", my_port);
 
     //Send the listening port to the server
     char* my_port_str = malloc(sizeof my_port);
     sprintf(my_port_str, "%d", my_port);
+    printf("my_port_str: %s\n", my_port_str);
 
-    char* conn_req = malloc(16);
+    char* conn_req = malloc(20);
     strcpy(conn_req, "add ");
     strcat(conn_req, my_port_str);
-    send(sockfd, conn_req, sizeof(conn_req), 0);
-    printf("sockfd1: %d\n", sockfd);
+    send(sockfd, conn_req, 20, 0);
+    printf("conn_req: %s\n", conn_req);
     
     //Do the listening in a child process
     if(!fork()) {
@@ -151,9 +194,12 @@ int main(int argc, char* argv[]) {
                 peer_port = ntohs(get_in_port((struct sockaddr *)&client_addr));
                 printf("server: got connection from %s:%d\n", peer_ip, peer_port);
             }
+            close(new_fd);
+            exit(0);
         }
     }
-
+    close(listenfd);
+    //Wait and read and respond to the user actions
     while(1) {
         args[0] = 0; // Empty the string array
         scanf("%[^\n]%*c", args);
@@ -220,7 +266,7 @@ int main(int argc, char* argv[]) {
                             
                             printf("file addr: %s:%s\n", fetch_result.peer_ip, fetch_result.peer_port);
                             printf("file location: %s\n", fetch_result.file_location);
-                            
+                            download_file(fetch_result);
                         }
                     }
                 }
