@@ -205,9 +205,6 @@ int main(void) {
                     char* peer_port_str = strtok(NULL, " ");
                     strcpy(peer_port, peer_port_str);
                     printf("server: got connection from %s:%s\n", peer_ip, peer_port_str);
-                    // if(-1 == send(new_fd, "added", 5, 0)) {
-                    //     perror("send");
-                    // }
                 } else if(0 == strcmp(action_req, "disconnect")) {
                     close(new_fd);
                     exit(0);
@@ -221,38 +218,31 @@ int main(void) {
                     char* file_name = strtok(NULL, " ");
                     if(0 != strlen(file_name)) {
                         struct matched_list matched_list = fetch_file(file_name, peer_ip, peer_port);
-                        int res_code;
+                        char res_code[4];
                         if(0 == matched_list.num_matches) {
-                            res_code = 404;
+                            strcpy(res_code, "404");
                         } else {
-                            res_code = 200;
+                            strcpy(res_code, "200");
                         }
-                        // printf("res_code: %d\n", res_code);
-                        // printf("htonl res_code: %d\n", htonl(res_code));
-                        // printf("ntohl res_code: %d\n", ntohl(htonl(res_code)));
-                        int res_code_conv = htonl(res_code);
+
                         int bytes_sent;
-                        if(-1 == (bytes_sent = send(new_fd, &res_code_conv, sizeof res_code_conv, 0))) {
+                        if(-1 == (bytes_sent = send(new_fd, res_code, 4, 0))) {
                             perror("send");
                         }
                         printf("\nbytes_sent before res: %d\n", bytes_sent);
 
-                        if(200 == res_code) {
+                        if(0 == strcmp("200", res_code)) {
                             sleep(0.5);
                             struct remote_file fetch_result = matched_list.matches[0];
 
                             char* data = (char*)malloc(sizeof(struct remote_file));
                             memcpy(data, &fetch_result, sizeof(struct remote_file));
                             
-                            // struct remote_file temp;
-                            // memcpy(&temp, data, sizeof(struct remote_file));
-                            // printf("temp: %s\n", temp.file_location);
-                            // printf("temp total: %s:%d\n", temp.peer_ip, peer_port);
                             printf("file_location: %s\n", fetch_result.file_location);
                             printf("file_ip: %s\n", fetch_result.peer_ip);
                             printf("file_port: %s\n", fetch_result.peer_port);
 
-                            if(-1 == (bytes_sent = send(new_fd, data, 10000, 0))) {
+                            if(-1 == (bytes_sent = send(new_fd, data, 1000, 0))) {
                                 perror("send");
                             }
                             printf("bytes_sent: %d\n", bytes_sent);

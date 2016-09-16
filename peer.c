@@ -382,15 +382,15 @@ int main(int argc, char* argv[]) {
                                 perror("send");
                             }
 
-                            int res_code;
-                            printf("sockfd2: %d\n", sockfd);
-                            if(-1 == (numbytes = recv(sockfd, &res_code, 16, 0))) {
+                            sleep(0.5);
+                            char res_code[4];
+                            if(-1 == (numbytes = recv(sockfd, res_code, 4, 0))) {
                                 perror("peer: recv");
                             }
                             printf("numbytes before 200: %d\n", numbytes);
-                            printf("peer: received res_code '%d'\n", ntohl(res_code));
+                            printf("peer: received res_code '%s'\n", res_code);
 
-                            if(200 == ntohl(res_code)) {
+                            if(0 == strcmp("200", res_code)) {
                                 memset(buf, 0, MAX_DATA_SIZE);
                                 if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
                                     perror("recv");
@@ -407,7 +407,7 @@ int main(int argc, char* argv[]) {
                                     download_file(fetch_result, download_path);
                                     exit(0);
                                 }
-                            } else if(400 == ntohl(res_code)) {
+                            } else if(0 == strcmp("404", res_code)) {
                                 printf("\nUh-oh! Requested file is not found!!\n");
                             }
                         }
