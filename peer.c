@@ -1,5 +1,6 @@
 //
 // Created by mouli on 8/24/16.
+// Acts as a peer in the p2p-system
 //
 #include <string.h>
 #include <netinet/in.h>
@@ -22,6 +23,14 @@
 #define BACKLOG 10
 #define FILE_BUF_SIZE 4096
 
+// struct to store remote_file data
+struct remote_file {
+    char peer_ip[INET6_ADDRSTRLEN];
+    char peer_port[8];
+    char file_name[256]; // File name as published by the peer
+    char file_location[256]; // Location of the file at peer
+};
+
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
@@ -31,6 +40,7 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+// get the port number from the sockaddr
 in_port_t get_in_port(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
         return (((struct sockaddr_in*)sa)->sin_port);
@@ -39,6 +49,7 @@ in_port_t get_in_port(struct sockaddr *sa) {
     return (((struct sockaddr_in6*)sa)->sin6_port);
 }
 
+// get the port assosciated with the listenfd
 int get_my_port(int listenfd) {
     struct sockaddr_in serv_addr;
     socklen_t len = sizeof(serv_addr);
@@ -51,14 +62,8 @@ int get_my_port(int listenfd) {
     return -1;
 }
 
-struct remote_file {
-    char peer_ip[INET6_ADDRSTRLEN];
-    char peer_port[8];
-    char file_name[256]; // File name as published by the peer
-    char file_location[256]; // Location of the file at peer
-};
-
-int download_file(struct remote_file file_req, char* download_path) {
+// helper to download given remote_file to the given download_path
+void download_file(struct remote_file file_req, char* download_path) {
     struct addrinfo hints, *servinfo, *p;
     int rv, fetchfd;
     char s[INET6_ADDRSTRLEN];
@@ -76,9 +81,8 @@ int download_file(struct remote_file file_req, char* download_path) {
     printf("peer_port: %s\n", file_req.peer_port);
     if(0 != (rv = getaddrinfo(file_req.peer_ip, file_req.peer_port, &hints, &servinfo))) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-        return 1;
+        return;
     }
-    
 
     for(p = servinfo; p != NULL; p = p->ai_next) {
         if(-1 == (fetchfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))) {
@@ -97,7 +101,7 @@ int download_file(struct remote_file file_req, char* download_path) {
 
     if(NULL == p) {
         fprintf(stderr, "peer: failed to connect\n");
-        return 2;
+        return;
     }
 
     inet_ntop(p->ai_family, get_in_addr((struct sockaddr*)p->ai_addr), s, sizeof s);
@@ -127,9 +131,7 @@ int download_file(struct remote_file file_req, char* download_path) {
     free(file_buf);
     close(f);
     close(fetchfd);
-    printf("Download finised\n");
-
-    return 0;
+    printf("\n%s finished downloading\n", file_req.file_name);
 }
 
 void upload_file(int connfd, char* file_name, char* download_path) {
@@ -163,19 +165,18 @@ void upload_file(int connfd, char* file_name, char* download_path) {
 
     free(file_buf);
     close(f);
-
-    return;
 }
 
+// publish the given file to the server.
 void publish_file_to_server(int connfd, char* file_name, char* file_location) {
     if(0 != strlen(file_name) && 0 != strlen(file_location)) {
-        char* publ_req = malloc(100);
+        char publ_req[200];
         strcpy(publ_req, "publish ");
         strcat(publ_req, file_name);
         strcat(publ_req, " ");
         strcat(publ_req, file_location);
         printf("publ_req: %s\n", publ_req);
-        if(-1 == send(connfd, publ_req, 100, 0)) {
+        if(-1 == send(connfd, publ_req, 200, 0)) {
             perror("send");
         }
     } else {
@@ -183,6 +184,7 @@ void publish_file_to_server(int connfd, char* file_name, char* file_location) {
     }
 }
 
+// publish all the files in the given path to the server
 void publish_files(int connfd, char* publish_path) {
     printf("\npublishing files started\n");
     DIR *d;
@@ -198,6 +200,7 @@ void publish_files(int connfd, char* publish_path) {
                 strcat(file_location, file_name);
                 printf("file found: %s\n\n", file_name);
                 publish_file_to_server(connfd, file_name, file_location);
+                sleep(0.5);
             }
         }
 
@@ -208,7 +211,7 @@ void publish_files(int connfd, char* publish_path) {
 
 int main(int argc, char* argv[]) {
     int sockfd, numbytes, new_fd, listenfd, my_port;
-    char buf[MAX_DATA_SIZE], sendBuff[MAX_DATA_SIZE], args[256], args_c[256];
+    char buf[MAX_DATA_SIZE], args[256], args_c[256];
     struct sockaddr_in serv_addr;
     char* action;
     struct addrinfo hints, *servinfo, *p, *peerinfo;
@@ -219,7 +222,7 @@ int main(int argc, char* argv[]) {
     char* download_path;
 
     if(4 != argc) {
-        fprintf(stderr, "usage: peer server_ip server_port abs_share_path\n");
+        fprintf(stderr, "usage: peer <server_ip> <server_port> <abs_share_path>\n");
         exit(1);
     }
 
@@ -262,7 +265,6 @@ int main(int argc, char* argv[]) {
     listenfd = socket(AF_INET, SOCK_STREAM, 0);
 
     memset(&serv_addr, '0', sizeof(serv_addr));
-    memset(sendBuff, '0', sizeof(sendBuff)); 
 
     //Bind to 'listenfd'
     bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)); 
@@ -322,87 +324,96 @@ int main(int argc, char* argv[]) {
                     char* download_file_name = strtok(NULL, " ");
                     upload_file(new_fd, download_file_name, download_path);
                 }
+                exit(0);
             }
             close(new_fd);
-            exit(0);
         }
-    }
-    close(listenfd);
+    } else {
+        //Close the listenfd in the parent process as the child is doing the listening
+        close(listenfd);
 
-    //Publish files which you are sharing
-    publish_files(sockfd, download_path);
+        sleep(0.5);
+        //Publish files which you are sharing
+        publish_files(sockfd, download_path);
 
-    //Wait and read and respond to the user actions
-    while(1) {
-        args[0] = 0; // Empty the string array
-        scanf("%[^\n]%*c", args);
+        //Wait and read and respond to the user actions
+        while(1) {
+            args[0] = 0; // Empty the string array
+            scanf("%[^\n]%*c", args);
 
-        strncpy(args_c, args, sizeof args);
-        if(0 != strlen(args)) {
-            printf("args len: %d\n", strlen(args));
-            if(!fork()) {
-                action = strtok(args_c, " ");
-                if(0 == strcmp("add", action)) {
-                    buf[0] = 0;
-                    char* my_port_str = malloc(sizeof my_port);
-                    sprintf(my_port_str, "%d", my_port);
+            strncpy(args_c, args, sizeof args);
+            if(0 != strlen(args)) {
+                printf("args len: %d\n", strlen(args));
+                if(!fork()) {
+                    action = strtok(args_c, " ");
+                    if(0 == strcmp("add", action)) {
+                        buf[0] = 0;
+                        char* my_port_str = malloc(sizeof my_port);
+                        sprintf(my_port_str, "%d", my_port);
 
-                    char* conn_req = malloc(16);
-                    strcpy(conn_req, "connect ");
-                    strcat(conn_req, my_port_str);
-                    send(sockfd, conn_req, 16, 0);
-                    if(-1 == send(sockfd, conn_req, 16, 0)) {
-                        perror("send");
-                    }
-
-                    buf[0] = 0;
-                    if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
-                        perror("peer: recv");
-                        exit(1);
-                    }
-                    buf[numbytes] = '\0';
-                    printf("peer: received '%s'\n", buf);
-                } else if(0 == strcmp("publish", action)) {
-                    char* file_name = strtok(NULL, " ");
-                    char* file_location = strtok(NULL, " ");
-                    if(0 == strcmp(file_name, "ALL")) {
-                        publish_files(sockfd, download_path);
-                    }
-                    publish_file_to_server(sockfd, file_name, file_location);
-                } else if(0 == strcmp("fetch", action)) {
-                    char* file_name = strtok(NULL, " ");
-                    if(0 == strlen(file_name)) {
-                        printf("'fetch' called without a file name. Use 'help' to see proper usage");
-                    } else {
-                        if(-1 == send(sockfd, args, strlen(args), 0)) {
+                        char* conn_req = malloc(16);
+                        strcpy(conn_req, "connect ");
+                        strcat(conn_req, my_port_str);
+                        send(sockfd, conn_req, 16, 0);
+                        if(-1 == send(sockfd, conn_req, 16, 0)) {
                             perror("send");
                         }
 
-                        int res_code;
-                        printf("sockfd2: %d\n", sockfd);
-                        if(-1 == recv(sockfd, &res_code, 16, 0)) {
+                        buf[0] = 0;
+                        if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
                             perror("peer: recv");
+                            exit(1);
                         }
-                        printf("peer: received res_code '%d'\n", ntohl(res_code));
-
-                        if(200 == ntohl(res_code)) {
-                            memset(buf, 0, MAX_DATA_SIZE);
-                            if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
-                                perror("recv");
-                                exit(1);
+                        buf[numbytes] = '\0';
+                        printf("peer: received '%s'\n", buf);
+                    } else if(0 == strcmp("publish", action)) {
+                        char* file_name = strtok(NULL, " ");
+                        char* file_location = strtok(NULL, " ");
+                        if(0 == strcmp(file_name, "ALL")) {
+                            publish_files(sockfd, download_path);
+                        }
+                        publish_file_to_server(sockfd, file_name, file_location);
+                    } else if(0 == strcmp("fetch", action)) {
+                        char* file_name = strtok(NULL, " ");
+                        if(0 == strlen(file_name)) {
+                            printf("'fetch' called without a file name. Use 'help' to see proper usage");
+                        } else {
+                            if(-1 == send(sockfd, args, strlen(args), 0)) {
+                                perror("send");
                             }
-                            struct remote_file fetch_result;
-                            memcpy(&fetch_result, buf, numbytes);
 
-                            printf("file addr: %s:%s\n", fetch_result.peer_ip, fetch_result.peer_port);
-                            printf("file location: %s\n", fetch_result.file_location);
-                            download_file(fetch_result, download_path);
-                        } else if(400 == ntohl(res_code)) {
-                            printf("\nUh-oh! Requested file is not found!!\n");
+                            int res_code;
+                            printf("sockfd2: %d\n", sockfd);
+                            if(-1 == (numbytes = recv(sockfd, &res_code, 16, 0))) {
+                                perror("peer: recv");
+                            }
+                            printf("numbytes before 200: %d\n", numbytes);
+                            printf("peer: received res_code '%d'\n", ntohl(res_code));
+
+                            if(200 == ntohl(res_code)) {
+                                memset(buf, 0, MAX_DATA_SIZE);
+                                if(-1 == (numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0))) {
+                                    perror("recv");
+                                    exit(1);
+                                }
+                                printf("numbytes after 200: %d\n", numbytes);
+                                struct remote_file fetch_result;
+                                memcpy(&fetch_result, buf, numbytes);
+
+                                printf("file addr: %s:%s\n", fetch_result.peer_ip, fetch_result.peer_port);
+                                printf("file location: %s\n", fetch_result.file_location);
+                                if(!fork()) {
+                                    close(sockfd);
+                                    download_file(fetch_result, download_path);
+                                    exit(0);
+                                }
+                            } else if(400 == ntohl(res_code)) {
+                                printf("\nUh-oh! Requested file is not found!!\n");
+                            }
                         }
                     }
+                    exit(0);
                 }
-                exit(0);
             }
         }
     }

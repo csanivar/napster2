@@ -1,0 +1,5 @@
+#Compile peer.c using gcc
+gcc peer.c -o peer
+echo "Compilation of peer.c is finished"
+echo "Usage: './peer <server_ip> <server_port> <abs_share_path>'"
+echo "<server_port> is 9967"

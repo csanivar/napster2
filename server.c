@@ -1,3 +1,5 @@
+//Acts as the central server in the p2p-system 
+
 #include <string.h>
 #include <netinet/in.h>
 #include <netdb.h>
@@ -13,10 +15,24 @@
 #include <sys/types.h>
 #include <fcntl.h>
 
-
 #define SERVER_PORT "9967"
 #define BACKLOG 10
-#define MAX_DATA_SIZE 200
+#define MAX_DATA_SIZE 10000
+
+struct remote_file {
+    char peer_ip[INET6_ADDRSTRLEN];
+    char peer_port[8];
+    char file_name[256]; // File name as published by the peer
+    char file_location[256]; // Location of the file at peer
+};
+
+struct matched_list {
+    struct remote_file* matches;
+    int num_matches;
+};
+
+struct remote_file* file_list;
+int* num_files;
 
 void sigchld_handler(int s) {
     // waitpid() might overwrite errno, so we save and restore it:
@@ -44,21 +60,6 @@ in_port_t get_in_port(struct sockaddr *sa) {
     return (((struct sockaddr_in6*)sa)->sin6_port);
 }
 
-struct remote_file {
-    char peer_ip[INET6_ADDRSTRLEN];
-    char peer_port[8];
-    char file_name[256]; // File name as published by the peer
-    char file_location[256]; // Location of the file at peer
-};
-
-struct matched_list {
-    struct remote_file* matches;
-    int num_matches;
-};
-
-struct remote_file* file_list;
-int* num_files;
-
 struct matched_list fetch_file(char* file_name, char peer_ip[], char peer_port[]) {
     // printf("num_files: %d\n", *num_files);
     int i = 0, num_matches = 0;
@@ -77,6 +78,22 @@ struct matched_list fetch_file(char* file_name, char peer_ip[], char peer_port[]
     result.matches = matches;
     result.num_matches = num_matches;
     return result; 
+}
+
+void add_file(char* file_name, char* file_location, char peer_ip[], char peer_port[]) {
+    struct remote_file file_received;
+
+    strcpy(file_received.peer_port, peer_port);
+    strcpy(file_received.peer_ip, peer_ip);
+    strcpy(file_received.file_name, file_name);
+    strcpy(file_received.file_location, file_location);
+    
+    file_list[*num_files] = file_received;
+    *num_files = *num_files + 1;
+
+    printf("file_addr: %s:%s\n", peer_ip, peer_port); 
+    printf("file_name: %s\n", file_name);
+    printf("file_location: %s\n", file_location);
 }
 
 int main(void) {
@@ -165,9 +182,11 @@ int main(void) {
             inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr *)&client_addr), peer_ip, sizeof peer_ip);
             
             while(1) {
+                memset(buf, 0, MAX_DATA_SIZE);
                 if(-1 == (numbytes = recv(new_fd, buf, MAX_DATA_SIZE-1, 0))) {
                     perror("server: recv");
                 }
+                printf("\nnumbytes received: %d\n", numbytes);
                 if(0 == numbytes) {
                     close(new_fd);
                     exit(0);
@@ -195,18 +214,9 @@ int main(void) {
                 } else if(0 == strcmp(action_req, "publish")) {
                     char* file_name = strtok(NULL, " ");
                     char* file_location = strtok(NULL, " ");
-                    struct remote_file file_received;
 
-                    strcpy(file_received.peer_port, peer_port);
-                    strcpy(file_received.peer_ip, peer_ip);
-                    strcpy(file_received.file_name, file_name);
-                    strcpy(file_received.file_location, file_location);
-                    file_list[*num_files] = file_received;
-                    *num_files = *num_files + 1;
-
-                    printf("file_addr: %s:%s\n", peer_ip, peer_port); 
-                    printf("file_name: %s\n", file_name);
-                    printf("file_location: %s\n", file_location);
+                    //Add the received file to the list
+                    add_file(file_name, file_location, peer_ip, peer_port);
                 } else if(0 == strcmp(action_req, "fetch")) {
                     char* file_name = strtok(NULL, " ");
                     if(0 != strlen(file_name)) {
@@ -221,11 +231,14 @@ int main(void) {
                         // printf("htonl res_code: %d\n", htonl(res_code));
                         // printf("ntohl res_code: %d\n", ntohl(htonl(res_code)));
                         int res_code_conv = htonl(res_code);
-                        if(-1 == send(new_fd, &res_code_conv, sizeof res_code_conv, 0)) {
+                        int bytes_sent;
+                        if(-1 == (bytes_sent = send(new_fd, &res_code_conv, sizeof res_code_conv, 0))) {
                             perror("send");
                         }
+                        printf("\nbytes_sent before res: %d\n", bytes_sent);
 
                         if(200 == res_code) {
+                            sleep(0.5);
                             struct remote_file fetch_result = matched_list.matches[0];
 
                             char* data = (char*)malloc(sizeof(struct remote_file));
@@ -239,7 +252,6 @@ int main(void) {
                             printf("file_ip: %s\n", fetch_result.peer_ip);
                             printf("file_port: %s\n", fetch_result.peer_port);
 
-                            int bytes_sent;
                             if(-1 == (bytes_sent = send(new_fd, data, 10000, 0))) {
                                 perror("send");
                             }

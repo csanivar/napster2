@@ -1,0 +1,5 @@
+#Compie server.c using gcc
+gcc server.c -o server
+echo "Compilation of server.c is finished"
+echo "Usage: './server'"
+echo "Server runs on port 9967"
